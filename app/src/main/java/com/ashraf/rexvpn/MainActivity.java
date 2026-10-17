@@ -1,4 +1,3 @@
-
 package com.ashraf.rexvpn;
 
 import android.app.Activity;
@@ -7,9 +6,9 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.net.VpnService;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -24,29 +23,37 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
 
     private static final int REQUEST_CONFIG = 101;
+    private static final int REQUEST_VPN_PERMISSION = 102;
 
-    private int bg = Color.rgb(8, 10, 20);
-    private int panel = Color.rgb(20, 23, 39);
-    private int purple = Color.rgb(133, 84, 255);
-    private int cyan = Color.rgb(0, 225, 255);
-    private int white = Color.WHITE;
-    private int muted = Color.rgb(160, 166, 190);
+    private final int bg = Color.rgb(8, 10, 20);
+    private final int panel = Color.rgb(20, 23, 39);
+    private final int purple = Color.rgb(133, 84, 255);
+    private final int cyan = Color.rgb(0, 225, 255);
+    private final int white = Color.WHITE;
+    private final int muted = Color.rgb(160, 166, 190);
 
-    private LinearLayout root;
     private TextView status;
     private TextView configName;
     private TextView configInfo;
+    private Button connectButton;
+
     private String configText = "";
     private String selectedName = "";
+
+    private VpnEngine vpnEngine;
+    private boolean connecting = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        vpnEngine = new VpnEngine(this);
         showHome();
+        refreshConnectionState();
     }
 
     private void showHome() {
-        root = new LinearLayout(this);
+        LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(18), dp(20), dp(20));
         root.setBackgroundColor(bg);
@@ -63,23 +70,22 @@ public class MainActivity extends Activity {
 
         TextView tagline = text(
                 "THE POWER BEHIND THE SHADOW",
-                11, cyan, true);
+                11, cyan, true
+        );
         tagline.setPadding(0, dp(4), 0, dp(22));
         page.addView(tagline);
 
         LinearLayout statusCard = card();
-        TextView statusTitle = text(
-                "حالة الاتصال", 15, muted, false);
-        statusCard.addView(statusTitle);
+        statusCard.addView(text("حالة الاتصال", 15, muted, false));
 
         status = text("غير متصل", 23, white, true);
         status.setPadding(0, dp(10), 0, dp(6));
         statusCard.addView(status);
 
-        TextView statusHint = text(
-                "اختر ملف اتصال صالحًا للبدء",
-                12, muted, false);
-        statusCard.addView(statusHint);
+        statusCard.addView(text(
+                "استورد ملف WireGuard صالحًا للاتصال",
+                12, muted, false
+        ));
 
         page.addView(statusCard, matchWrap());
 
@@ -88,26 +94,21 @@ public class MainActivity extends Activity {
         page.addView(importButton, marginTop(14));
 
         LinearLayout configCard = card();
-        configName = text(
-                "لا يوجد ملف محدد", 16, white, true);
+
+        configName = text("لا يوجد ملف محدد", 16, white, true);
         configInfo = text(
                 "استورد ملف إعدادات من جهازك",
-                12, muted, false);
+                12, muted, false
+        );
 
         configName.setPadding(0, 0, 0, dp(8));
         configCard.addView(configName);
         configCard.addView(configInfo);
+
         page.addView(configCard, marginTop(14));
 
-        Button connectButton = button("اتصال");
-        connectButton.setOnClickListener(v -> {
-            if (configText.isEmpty()) {
-                toast("استورد ملف إعدادات أولًا.");
-                return;
-            }
-
-            toast("واجهة الاتصال جاهزة. ربط المحرك الفعلي لم يكتمل بعد.");
-        });
+        connectButton = button("اتصال");
+        connectButton.setOnClickListener(v -> onConnectButtonPressed());
         page.addView(connectButton, marginTop(14));
 
         Button serversButton = secondaryButton("السيرفرات");
@@ -122,16 +123,13 @@ public class MainActivity extends Activity {
         aboutButton.setOnClickListener(v -> showAbout());
         page.addView(aboutButton, marginTop(10));
 
-        TextView footer = text(
-                "REX VPN  •  NEXT",
-                11, muted, false);
+        TextView footer = text("REX VPN  •  NEXT", 11, muted, false);
         footer.setGravity(Gravity.CENTER);
         footer.setPadding(0, dp(28), 0, dp(8));
         page.addView(footer);
 
         scroll.addView(page);
-        root.addView(scroll, new LinearLayout.LayoutParams(
-                -1, 0, 1));
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         setContentView(root);
     }
@@ -150,8 +148,23 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(
-            int requestCode, int resultCode, Intent data) {
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQUEST_VPN_PERMISSION) {
+            if (resultCode == RESULT_OK) {
+                startWireGuardConnection();
+            } else {
+                connecting = false;
+                updateConnectionButton();
+                setStatus("تم رفض إذن VPN");
+                toast("لازم توافق على إذن VPN لتشغيل الاتصال.");
+            }
+            return;
+        }
 
         if (requestCode != REQUEST_CONFIG
                 || resultCode != RESULT_OK
@@ -166,44 +179,220 @@ public class MainActivity extends Activity {
             StringBuilder content = new StringBuilder();
 
             try (InputStream input =
-                         getContentResolver().openInputStream(uri);
-                 BufferedReader reader = new BufferedReader(
-                         new InputStreamReader(
-                                 input, StandardCharsets.UTF_8))) {
+                         getContentResolver().openInputStream(uri)) {
 
-                if (reader == null) {
+                if (input == null) {
                     throw new IllegalStateException(
-                            "تعذر قراءة الملف.");
+                            "تعذر قراءة الملف."
+                    );
                 }
 
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    content.append(line).append('\n');
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(
+                                input, StandardCharsets.UTF_8))) {
 
-                    if (content.length() > 1024 * 1024) {
-                        throw new IllegalArgumentException(
-                                "حجم الملف أكبر من 1 ميجابايت.");
+                    String line;
+
+                    while ((line = reader.readLine()) != null) {
+                        content.append(line).append('\n');
+
+                        if (content.length() > 1024 * 1024) {
+                            throw new IllegalArgumentException(
+                                    "حجم الملف أكبر من 1 ميجابايت."
+                            );
+                        }
                     }
                 }
             }
 
-            configText = content.toString().trim();
+            String imported = content.toString().trim();
+
+            if (imported.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "الملف فارغ."
+                );
+            }
+
+            configText = imported;
             selectedName = getFileName(uri);
 
             configName.setText(
                     selectedName.isEmpty()
                             ? "ملف مستورد"
-                            : selectedName);
+                            : selectedName
+            );
 
-            configInfo.setText(
-                    "تمت قراءة الملف. نوع الإعدادات لم يُختبر بعد.");
+            VpnEngine.EngineType type =
+                    VpnEngine.detectEngine(configText);
 
-            toast("تم استيراد الملف.");
+            if (type == VpnEngine.EngineType.WIREGUARD) {
+                configInfo.setText(
+                        "تم استيراد ملف WireGuard."
+                );
+                toast("تم استيراد إعداد WireGuard.");
+            } else {
+                configInfo.setText(
+                        "البروتوكول معروف، لكن محركه غير موصول بعد."
+                );
+                toast(
+                        "ملف sing-box مستورد، لكن الاتصال به لم يُفعّل بعد."
+                );
+            }
 
         } catch (Exception e) {
             configText = "";
             selectedName = "";
-            toast("فشل استيراد الملف: " + e.getMessage());
+            configName.setText("لا يوجد ملف محدد");
+            configInfo.setText("تعذر تحميل الإعدادات.");
+            toast("فشل استيراد الملف: " + errorMessage(e));
+        }
+    }
+
+    private void onConnectButtonPressed() {
+        if (vpnEngine.isWireGuardConnected()) {
+            disconnectWireGuard();
+            return;
+        }
+
+        if (connecting) {
+            toast("جاري تجهيز الاتصال.");
+            return;
+        }
+
+        if (configText.isEmpty()) {
+            toast("استورد ملف إعدادات أولًا.");
+            return;
+        }
+
+        try {
+            VpnEngine.EngineType type =
+                    VpnEngine.detectEngine(configText);
+
+            if (type != VpnEngine.EngineType.WIREGUARD) {
+                toast(
+                        "الاتصال الفعلي بهذا البروتوكول لم يُربط بعد."
+                );
+                return;
+            }
+
+            Intent permissionIntent = VpnService.prepare(this);
+
+            if (permissionIntent != null) {
+                connecting = true;
+                updateConnectionButton();
+                startActivityForResult(
+                        permissionIntent,
+                        REQUEST_VPN_PERMISSION
+                );
+            } else {
+                startWireGuardConnection();
+            }
+
+        } catch (Exception e) {
+            connecting = false;
+            updateConnectionButton();
+            toast("الإعداد غير صالح: " + errorMessage(e));
+        }
+    }
+
+    private void startWireGuardConnection() {
+        connecting = true;
+        setStatus("جاري الاتصال...");
+        updateConnectionButton();
+
+        new Thread(() -> {
+            try {
+                vpnEngine.connectWireGuard(
+                        getApplicationContext(),
+                        configText
+                );
+
+                runOnUiThread(() -> {
+                    connecting = false;
+
+                    if (vpnEngine.isWireGuardConnected()) {
+                        setStatus("WireGuard متصل");
+                        configInfo.setText(
+                                "تم تشغيل نفق WireGuard."
+                        );
+                        toast("تم تشغيل نفق WireGuard.");
+                    } else {
+                        setStatus("لم يتأكد الاتصال");
+                        toast("المحرك لم يؤكد تشغيل النفق.");
+                    }
+
+                    updateConnectionButton();
+                });
+
+            } catch (Exception e) {
+                String message = errorMessage(e);
+
+                runOnUiThread(() -> {
+                    connecting = false;
+                    setStatus("فشل الاتصال");
+                    updateConnectionButton();
+                    toast("فشل الاتصال: " + message);
+                });
+            }
+        }).start();
+    }
+
+    private void disconnectWireGuard() {
+        connecting = true;
+        updateConnectionButton();
+        setStatus("جاري الفصل...");
+
+        new Thread(() -> {
+            try {
+                vpnEngine.disconnectWireGuard();
+
+                runOnUiThread(() -> {
+                    connecting = false;
+                    setStatus("غير متصل");
+                    updateConnectionButton();
+                    toast("تم فصل اتصال WireGuard.");
+                });
+
+            } catch (Exception e) {
+                String message = errorMessage(e);
+
+                runOnUiThread(() -> {
+                    connecting = false;
+                    refreshConnectionState();
+                    toast("تعذر الفصل: " + message);
+                });
+            }
+        }).start();
+    }
+
+    private void refreshConnectionState() {
+        if (vpnEngine != null && vpnEngine.isWireGuardConnected()) {
+            setStatus("WireGuard متصل");
+        } else {
+            setStatus("غير متصل");
+        }
+
+        updateConnectionButton();
+    }
+
+    private void updateConnectionButton() {
+        if (connectButton == null) {
+            return;
+        }
+
+        if (connecting) {
+            connectButton.setText("جاري التنفيذ...");
+        } else if (vpnEngine != null
+                && vpnEngine.isWireGuardConnected()) {
+            connectButton.setText("فصل الاتصال");
+        } else {
+            connectButton.setText("اتصال");
+        }
+    }
+
+    private void setStatus(String value) {
+        if (status != null) {
+            status.setText(value);
         }
     }
 
@@ -218,30 +407,42 @@ public class MainActivity extends Activity {
         return slash >= 0 ? name.substring(slash + 1) : name;
     }
 
+    private String errorMessage(Exception e) {
+        String message = e.getMessage();
+
+        if (message == null || message.trim().isEmpty()) {
+            return e.getClass().getSimpleName();
+        }
+
+        return message;
+    }
+
     private void showServers() {
         setSimplePage(
                 "السيرفرات",
-                "إدارة السيرفرات ستُربط بقاعدة بيانات محلية "
-                        + "ومحرك الاتصال في المرحلة التالية.");
+                "إدارة السيرفرات ستُضاف في مرحلة لاحقة."
+        );
     }
 
     private void showSettings() {
         setSimplePage(
                 "الإعدادات",
-                "إعدادات المظهر والاتصال والبروتوكولات "
-                        + "سيتم إضافتها مع ربط المحركات.");
+                "إعدادات المظهر والاتصال ستُضاف لاحقًا."
+        );
     }
 
     private void showAbout() {
         setSimplePage(
                 "حول REX VPN",
                 "واجهة مشروع REX VPN NEXT.\n\n"
-                        + "لم يتم تأكيد تشغيل أي نفق من هذه الصفحة "
-                        + "حتى الآن.");
+                        + "تم ربط زر الاتصال بمحرك WireGuard الموجود "
+                        + "في المشروع. نجاح تشغيل النفق لا يضمن وحده "
+                        + "أن الخادم يتيح الوصول إلى الإنترنت."
+        );
     }
 
     private void setSimplePage(String title, String message) {
-        root = new LinearLayout(this);
+        LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(24), dp(20), dp(20));
         root.setBackgroundColor(bg);
@@ -254,7 +455,10 @@ public class MainActivity extends Activity {
         root.addView(body);
 
         Button back = button("العودة للرئيسية");
-        back.setOnClickListener(v -> showHome());
+        back.setOnClickListener(v -> {
+            showHome();
+            refreshConnectionState();
+        });
         root.addView(back);
 
         setContentView(root);
@@ -284,7 +488,8 @@ public class MainActivity extends Activity {
 
         GradientDrawable shape = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{purple, Color.rgb(83, 57, 185)});
+                new int[]{purple, Color.rgb(83, 57, 185)}
+        );
         shape.setCornerRadius(dp(14));
         b.setBackground(shape);
 
@@ -308,7 +513,11 @@ public class MainActivity extends Activity {
     }
 
     private TextView text(
-            String value, int size, int color, boolean bold) {
+            String value,
+            int size,
+            int color,
+            boolean bold
+    ) {
         TextView view = new TextView(this);
         view.setText(value);
         view.setTextSize(size);
@@ -339,6 +548,10 @@ public class MainActivity extends Activity {
     }
 
     private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        Toast.makeText(
+                this,
+                message,
+                Toast.LENGTH_LONG
+        ).show();
     }
 }
