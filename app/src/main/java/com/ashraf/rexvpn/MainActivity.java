@@ -405,7 +405,7 @@ public class MainActivity extends Activity {
         updateConnectionButton();
 
         try {
-            Intent intent = RexSingBoxService.connectIntent(
+            Intent intent = RexSingBoxService.Companion.connectIntent(
                     getApplicationContext(),
                     configText
             );
@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
         updateConnectionButton();
 
         try {
-            Intent intent = RexSingBoxService.disconnectIntent(
+            Intent intent = RexSingBoxService.Companion.disconnectIntent(
                     getApplicationContext()
             );
 
