@@ -2,6 +2,7 @@ package com.ashraf.rexvpn;
 
 import android.content.Context;
 import android.net.VpnService;
+import android.util.Log;
 
 import com.wireguard.android.backend.Backend;
 import com.wireguard.android.backend.GoBackend;
@@ -10,8 +11,11 @@ import com.wireguard.config.Config;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 public final class VpnEngine {
+
+    private static final String TAG = "REXVPN";
 
     public enum EngineType {
         WIREGUARD,
@@ -34,32 +38,20 @@ public final class VpnEngine {
 
             @Override
             public void onStateChange(State state) {
-                android.util.Log.i(
-                    "REXVPN",
-                    "WireGuard state: " + state
-                );
+                Log.i(TAG, "WireGuard state: " + state);
             }
         };
     }
 
     public static EngineType detectEngine(String config) {
-        if (config == null) {
+        if (config == null || config.trim().isEmpty()) {
             throw new IllegalArgumentException(
-                "ملف الإعداد فارغ"
+                    "ملف الإعداد فارغ"
             );
         }
 
         String value = config.trim();
-
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException(
-                "ملف الإعداد فارغ"
-            );
-        }
-
-        String lower = value.toLowerCase(
-            java.util.Locale.ROOT
-        );
+        String lower = value.toLowerCase(Locale.ROOT);
 
         if (lower.contains("[interface]")
                 && lower.contains("[peer]")) {
@@ -79,7 +71,7 @@ public final class VpnEngine {
         }
 
         throw new IllegalArgumentException(
-            "نوع إعداد VPN غير مدعوم أو غير معروف"
+                "نوع إعداد VPN غير مدعوم أو غير معروف"
         );
     }
 
@@ -90,35 +82,34 @@ public final class VpnEngine {
 
         if (VpnService.prepare(context) != null) {
             throw new SecurityException(
-                "لازم توافق على إذن VPN من أندرويد أولًا"
+                    "لازم توافق على إذن VPN من أندرويد أولًا"
             );
         }
 
         if (detectEngine(configText) != EngineType.WIREGUARD) {
             throw new IllegalArgumentException(
-                "الإعداد ده مش ملف WireGuard"
+                    "الإعداد ده مش ملف WireGuard"
             );
         }
 
         Config config;
 
         try (ByteArrayInputStream input =
-                new ByteArrayInputStream(
-                    configText.getBytes(StandardCharsets.UTF_8)
-                )) {
+                     new ByteArrayInputStream(
+                             configText.getBytes(StandardCharsets.UTF_8))) {
             config = Config.parse(input);
         }
 
         wireGuardBackend.setState(
-            wireGuardTunnel,
-            Tunnel.State.UP,
-            config
+                wireGuardTunnel,
+                Tunnel.State.UP,
+                config
         );
 
         if (wireGuardBackend.getState(wireGuardTunnel)
                 != Tunnel.State.UP) {
             throw new IllegalStateException(
-                "محرك WireGuard لم يؤكد تشغيل النفق"
+                    "محرك WireGuard لم يؤكد تشغيل النفق"
             );
         }
     }
@@ -129,15 +120,20 @@ public final class VpnEngine {
         if (wireGuardBackend.getState(wireGuardTunnel)
                 == Tunnel.State.UP) {
             wireGuardBackend.setState(
-                wireGuardTunnel,
-                Tunnel.State.DOWN,
-                null
+                    wireGuardTunnel,
+                    Tunnel.State.DOWN,
+                    null
             );
         }
     }
 
     public synchronized boolean isWireGuardConnected() {
-        return wireGuardBackend.getState(wireGuardTunnel)
-                == Tunnel.State.UP;
+        try {
+            return wireGuardBackend.getState(wireGuardTunnel)
+                    == Tunnel.State.UP;
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to read WireGuard state", e);
+            return false;
+        }
     }
 }
