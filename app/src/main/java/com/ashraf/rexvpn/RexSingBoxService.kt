@@ -44,6 +44,19 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
         const val EXTRA_CONFIG =
             "com.ashraf.rexvpn.extra.SINGBOX_CONFIG"
+                const val ACTION_STATUS =
+            "com.ashraf.rexvpn.action.SINGBOX_STATUS"
+
+        const val EXTRA_STATUS =
+            "com.ashraf.rexvpn.extra.SINGBOX_STATUS"
+
+        const val EXTRA_MESSAGE =
+            "com.ashraf.rexvpn.extra.SINGBOX_MESSAGE"
+
+        const val STATUS_CONNECTING = "CONNECTING"
+        const val STATUS_STARTED = "STARTED"
+        const val STATUS_DISCONNECTED = "DISCONNECTED"
+        const val STATUS_FAILED = "FAILED"
 
         fun connectIntent(
             context: Context,
