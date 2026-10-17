@@ -81,7 +81,16 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         get() = getSystemService(
             Context.CONNECTIVITY_SERVICE
         ) as ConnectivityManager
+    private fun reportStatus(status: String, message: String) {
+        val statusIntent = Intent(ACTION_STATUS).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_STATUS, status)
+            putExtra(EXTRA_MESSAGE, message)
+        }
 
+        sendBroadcast(statusIntent)
+        Log.i(TAG, "Status reported: $status - $message")
+    }
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
