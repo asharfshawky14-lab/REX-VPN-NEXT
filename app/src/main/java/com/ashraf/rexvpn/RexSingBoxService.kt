@@ -102,25 +102,46 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         flags: Int,
         startId: Int
     ): Int {
-        when (intent?.action) {
+                when (intent?.action) {
             ACTION_CONNECT -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
 
                 if (config.isNullOrBlank()) {
+                    reportStatus(
+                        STATUS_FAILED,
+                        "إعدادات sing-box فارغة"
+                    )
                     Log.e(TAG, "Missing sing-box configuration")
                     stopSelf(startId)
                     return START_NOT_STICKY
                 }
+
+                reportStatus(
+                    STATUS_CONNECTING,
+                    "جاري تشغيل sing-box"
+                )
 
                 try {
                     startForeground(
                         NOTIFICATION_ID,
                         buildNotification("جاري تشغيل الاتصال")
                     )
+
                     startSingBox(config)
+
+                    reportStatus(
+                        STATUS_STARTED,
+                        "بدأت الخدمة؛ لم يتم تأكيد وصول الإنترنت بعد"
+                    )
                 } catch (error: Exception) {
                     Log.e(TAG, "Failed to start sing-box", error)
                     stopSingBox()
+
+                    reportStatus(
+                        STATUS_FAILED,
+                        error.message ?: "فشل تشغيل sing-box"
+                    )
+
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
                 }
@@ -128,6 +149,12 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
             ACTION_DISCONNECT -> {
                 stopSingBox()
+
+                reportStatus(
+                    STATUS_DISCONNECTED,
+                    "تم فصل sing-box"
+                )
+
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf(startId)
             }
@@ -137,7 +164,6 @@ class RexSingBoxService : VpnService(), PlatformInterface {
                 stopSelf(startId)
             }
         }
-
         return START_NOT_STICKY
     }
 
