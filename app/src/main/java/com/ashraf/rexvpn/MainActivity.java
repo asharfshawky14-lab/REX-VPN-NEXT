@@ -73,9 +73,16 @@ public class MainActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
 
-        TextView brand = text("REX VPN", 30, white, true);
-        brand.setLetterSpacing(0.08f);
-        page.addView(brand);
+        ImageView brand = new ImageView(this);
+brand.setImageResource(R.drawable.rex_logo);
+brand.setAdjustViewBounds(true);
+brand.setScaleType(ImageView.ScaleType.FIT_CENTER);
+
+LinearLayout.LayoutParams logoParams =
+        new LinearLayout.LayoutParams(-1, dp(110));
+logoParams.bottomMargin = dp(6);
+
+page.addView(brand, logoParams);
 
         TextView tagline = text(
                 "THE POWER BEHIND THE SHADOW",
