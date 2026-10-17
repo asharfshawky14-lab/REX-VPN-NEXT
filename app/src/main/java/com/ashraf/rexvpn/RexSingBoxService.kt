@@ -1,28 +1,22 @@
 package com.ashraf.rexvpn
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
-import android.net.NetworkInterface as AndroidNetworkInterface
 import android.net.VpnService
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import androidx.annotation.RequiresApi
-import io.nekohasekai.libbox.AutoRedirectHandler
-import io.nekohasekai.libbox.AutoRedirectSession
 import io.nekohasekai.libbox.BridgeOptions
 import io.nekohasekai.libbox.BridgeSession
 import io.nekohasekai.libbox.ConnectionOwner
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.LocalDNSTransport
-import io.nekohasekai.libbox.NeighborEntryIterator
 import io.nekohasekai.libbox.NeighborUpdateListener
 import io.nekohasekai.libbox.NetworkInterfaceIterator
 import io.nekohasekai.libbox.PlatformInterface
@@ -32,6 +26,7 @@ import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
 import java.net.InetSocketAddress
+import java.net.NetworkInterface as JavaNetworkInterface
 
 class RexSingBoxService : VpnService(), PlatformInterface {
 
@@ -52,18 +47,15 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         fun connectIntent(
             context: Context,
             configJson: String
-        ): Intent {
-            return Intent(context, RexSingBoxService::class.java).apply {
-                action = ACTION_CONNECT
-                putExtra(EXTRA_CONFIG, configJson)
-            }
+        ): Intent = Intent(context, RexSingBoxService::class.java).apply {
+            action = ACTION_CONNECT
+            putExtra(EXTRA_CONFIG, configJson)
         }
 
-        fun disconnectIntent(context: Context): Intent {
-            return Intent(context, RexSingBoxService::class.java).apply {
+        fun disconnectIntent(context: Context): Intent =
+            Intent(context, RexSingBoxService::class.java).apply {
                 action = ACTION_DISCONNECT
             }
-        }
     }
 
     private var engine: SingBoxEngine? = null
@@ -78,7 +70,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        Log.i(TAG, "REX sing-box service created")
+        Log.i(TAG, "Service created")
     }
 
     override fun onStartCommand(
@@ -128,10 +120,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
     @Synchronized
     private fun startSingBox(configJson: String) {
-        check(!connecting) {
-            "sing-box is already starting"
-        }
-
+        check(!connecting) { "sing-box is already starting" }
         connecting = true
 
         try {
@@ -139,17 +128,14 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
             val newEngine = SingBoxEngine(this)
             engine = newEngine
-
             newEngine.connect(configJson)
 
-            Log.i(TAG, "sing-box started successfully")
+            Log.i(TAG, "sing-box started")
         } catch (error: Exception) {
-            engine?.disconnect()
+            runCatching { engine?.disconnect() }
             engine = null
 
-            tunDescriptor?.let {
-                runCatching { it.close() }
-            }
+            runCatching { tunDescriptor?.close() }
             tunDescriptor = null
 
             throw error
@@ -160,26 +146,17 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
     @Synchronized
     private fun stopSingBox() {
-        val currentEngine = engine
+        val oldEngine = engine
         engine = null
 
-        try {
-            currentEngine?.disconnect()
-        } catch (error: Exception) {
-            Log.e(TAG, "Error stopping sing-box engine", error)
-        }
+        runCatching { oldEngine?.disconnect() }
+            .onFailure { Log.e(TAG, "Engine shutdown failed", it) }
 
-        tunDescriptor?.let {
-            try {
-                it.close()
-            } catch (error: Exception) {
-                Log.w(TAG, "Error closing TUN descriptor", error)
-            }
-        }
+        runCatching { tunDescriptor?.close() }
+            .onFailure { Log.e(TAG, "TUN close failed", it) }
 
         tunDescriptor = null
         connecting = false
-
         Log.i(TAG, "sing-box stopped")
     }
 
@@ -198,22 +175,16 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     override fun onDestroy() {
         stopSingBox()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        Log.i(TAG, "REX sing-box service destroyed")
         super.onDestroy()
     }
 
-    // ---------------------------------------------------------
     // VPN tunnel
-    // ---------------------------------------------------------
 
     override fun openTun(options: TunOptions): Int {
         check(VpnService.prepare(this) == null) {
             "VPN permission has not been granted"
         }
-
-        check(options.mtu > 0) {
-            "Invalid VPN MTU"
-        }
+        check(options.mtu > 0) { "Invalid VPN MTU" }
 
         val builder = Builder()
             .setSession("REX VPN")
@@ -226,79 +197,52 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         val ipv4Addresses = options.inet4Address
         while (ipv4Addresses.hasNext()) {
             val address = ipv4Addresses.next()
-            builder.addAddress(
-                address.address(),
-                address.prefix()
-            )
+            builder.addAddress(address.address(), address.prefix())
         }
 
         val ipv6Addresses = options.inet6Address
         while (ipv6Addresses.hasNext()) {
             val address = ipv6Addresses.next()
-            builder.addAddress(
-                address.address(),
-                address.prefix()
-            )
+            builder.addAddress(address.address(), address.prefix())
         }
 
         if (options.autoRoute) {
             if (options.dnsMode.value != Libbox.DNSModeDisabled) {
                 val dnsServers = options.dnsServerAddress
-
                 while (dnsServers.hasNext()) {
                     builder.addDnsServer(dnsServers.next())
                 }
             }
 
-            // IPv4 routes
             val ipv4Routes = options.inet4RouteRange
             while (ipv4Routes.hasNext()) {
                 val route = ipv4Routes.next()
-                builder.addRoute(
-                    route.address(),
-                    route.prefix()
-                )
+                builder.addRoute(route.address(), route.prefix())
             }
 
-            // IPv6 routes
             val ipv6Routes = options.inet6RouteRange
             while (ipv6Routes.hasNext()) {
                 val route = ipv6Routes.next()
-                builder.addRoute(
-                    route.address(),
-                    route.prefix()
-                )
+                builder.addRoute(route.address(), route.prefix())
             }
 
-            // Applications explicitly included in the VPN
             val includedPackages = options.includePackage
             while (includedPackages.hasNext()) {
                 val packageName = includedPackages.next()
-
                 try {
                     builder.addAllowedApplication(packageName)
                 } catch (error: PackageManager.NameNotFoundException) {
-                    Log.w(
-                        TAG,
-                        "Included application not found: $packageName",
-                        error
-                    )
+                    Log.w(TAG, "Included package not found: $packageName", error)
                 }
             }
 
-            // Applications explicitly excluded from the VPN
             val excludedPackages = options.excludePackage
             while (excludedPackages.hasNext()) {
                 val packageName = excludedPackages.next()
-
                 try {
                     builder.addDisallowedApplication(packageName)
                 } catch (error: PackageManager.NameNotFoundException) {
-                    Log.w(
-                        TAG,
-                        "Excluded application not found: $packageName",
-                        error
-                    )
+                    Log.w(TAG, "Excluded package not found: $packageName", error)
                 }
             }
         }
@@ -307,26 +251,19 @@ class RexSingBoxService : VpnService(), PlatformInterface {
             ?: error("Android could not establish the VPN tunnel")
 
         tunDescriptor = descriptor
-
-        Log.i(TAG, "Android TUN established")
+        Log.i(TAG, "TUN established")
         return descriptor.fd
     }
 
-    override fun usePlatformAutoDetectInterfaceControl(): Boolean {
-        return true
-    }
+    override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        check(protect(fd)) {
-            "Unable to protect socket from VPN routing"
-        }
+        check(protect(fd)) { "Unable to protect socket from VPN routing" }
     }
 
-    override fun useProcFS(): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-    }
+    override fun useProcFS(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     override fun findConnectionOwner(
         ipProtocol: Int,
         sourceAddress: String,
@@ -334,28 +271,26 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         destinationAddress: String,
         destinationPort: Int
     ): ConnectionOwner {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "Connection owner lookup requires Android 10 or later"
+        }
+
         val uid = connectivityManager.getConnectionOwnerUid(
             ipProtocol,
             InetSocketAddress(sourceAddress, sourcePort),
             InetSocketAddress(destinationAddress, destinationPort)
         )
 
-        check(uid >= 0) {
-            "Android could not identify the connection owner"
-        }
+        check(uid >= 0) { "Connection owner not found" }
 
-        val owner = ConnectionOwner()
-        owner.userId = uid
-        owner.userName =
-            packageManager.getPackagesForUid(uid)
+        return ConnectionOwner().apply {
+            userId = uid
+            userName = packageManager.getPackagesForUid(uid)
                 ?.firstOrNull() ?: ""
-
-        return owner
+        }
     }
 
-    // ---------------------------------------------------------
-    // Network interface monitoring
-    // ---------------------------------------------------------
+    // Network interface information
 
     override fun startDefaultInterfaceMonitor(
         listener: InterfaceUpdateListener
@@ -370,63 +305,48 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     }
 
     override fun getInterfaces(): NetworkInterfaceIterator {
-        val interfaces = mutableListOf<
-            io.nekohasekai.libbox.NetworkInterface
-        >()
+        val interfaces =
+            mutableListOf<io.nekohasekai.libbox.NetworkInterface>()
 
         try {
-            val androidInterfaces =
-                AndroidNetworkInterface.getNetworkInterfaces()
+            val networkInterfaces = JavaNetworkInterface.getNetworkInterfaces()
 
-            while (androidInterfaces.hasMoreElements()) {
-                val androidInterface =
-                    androidInterfaces.nextElement()
+            while (networkInterfaces.hasMoreElements()) {
+                val networkInterface = networkInterfaces.nextElement()
+                if (!networkInterface.isUp) continue
 
-                if (!androidInterface.isUp) continue
+                val item = io.nekohasekai.libbox.NetworkInterface()
+                item.name = networkInterface.name
+                item.index = networkInterface.index
 
-                val item =
-                    io.nekohasekai.libbox.NetworkInterface()
-
-                item.name = androidInterface.name
-                item.index = androidInterface.index
-
-                try {
-                    item.mtu = androidInterface.mtu
-                } catch (_: Exception) {
-                    // MTU is optional interface metadata.
-                }
+                runCatching { item.mtu = networkInterface.mtu }
 
                 item.addresses = StringArray(
-                    androidInterface.interfaceAddresses.mapNotNull {
-                        val address = it.address ?: return@mapNotNull null
-                        val host = address.hostAddress
-                            ?: return@mapNotNull null
-
-                        "$host/${it.networkPrefixLength}"
+                    networkInterface.interfaceAddresses.mapNotNull { entry ->
+                        val address = entry.address ?: return@mapNotNull null
+                        val host = address.hostAddress ?: return@mapNotNull null
+                        "$host/${entry.networkPrefixLength}"
                     }.iterator()
                 )
 
                 item.dnsServer = StringArray(emptyList<String>().iterator())
-                item.dnsSearchDomain = StringArray(emptyList<String>().iterator())
                 item.gateway = StringArray(emptyList<String>().iterator())
                 item.type = Libbox.InterfaceTypeOther
-                item.flags = 0
+                item.flags = if (networkInterface.isUp) 1 else 0
                 item.metered = false
 
                 interfaces.add(item)
             }
         } catch (error: Exception) {
-            Log.e(TAG, "Unable to enumerate network interfaces", error)
+            Log.e(TAG, "Failed to enumerate network interfaces", error)
         }
 
         val iterator = interfaces.iterator()
-
         return object : NetworkInterfaceIterator {
             override fun hasNext(): Boolean = iterator.hasNext()
 
-            override fun next(): io.nekohasekai.libbox.NetworkInterface {
-                return iterator.next()
-            }
+            override fun next(): io.nekohasekai.libbox.NetworkInterface =
+                iterator.next()
         }
     }
 
@@ -442,15 +362,11 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
     override fun localDNSTransport(): LocalDNSTransport? = null
 
-    override fun startNeighborMonitor(
-        listener: NeighborUpdateListener?
-    ) {
+    override fun startNeighborMonitor(listener: NeighborUpdateListener?) {
         Log.d(TAG, "Neighbor monitoring is not implemented")
     }
 
-    override fun closeNeighborMonitor(
-        listener: NeighborUpdateListener?
-    ) {
+    override fun closeNeighborMonitor(listener: NeighborUpdateListener?) {
         Log.d(TAG, "Neighbor monitoring closed")
     }
 
@@ -458,14 +374,12 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         Log.d(TAG, "Interface registration requested: $name")
     }
 
-    // ---------------------------------------------------------
-    // Optional platform features not supported by this service
-    // ---------------------------------------------------------
+    // Unsupported optional platform features
 
     override fun usePlatformShell(): Boolean = false
 
     override fun checkPlatformShell() {
-        error("Platform shell is not supported by REX VPN")
+        error("Platform shell is not supported")
     }
 
     override fun openShellSession(
@@ -476,7 +390,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         rows: Int,
         cols: Int
     ): ShellSession {
-        error("Platform shell sessions are not supported by REX VPN")
+        error("Platform shell sessions are not supported")
     }
 
     override fun readSystemSSHHostKey(): String {
@@ -487,34 +401,32 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         error("SFTP server lookup is not supported")
     }
 
-    override fun tailscaleHostname(): String {
-        return "${Build.MANUFACTURER} ${Build.MODEL}"
-    }
+    override fun tailscaleHostname(): String =
+        "${Build.MANUFACTURER} ${Build.MODEL}"
 
     override fun usePlatformBridge(): Boolean = false
 
-    override fun createBridge(
-        options: BridgeOptions?
-    ): BridgeSession {
-        error("Platform bridge is not supported by REX VPN")
-    }
-
-    override fun usePlatformAutoRedirect(): Boolean = false
-
-    override fun createAutoRedirect(
-        options: ByteArray?,
-        handler: AutoRedirectHandler?
-    ): AutoRedirectSession {
-        error("Platform auto-redirect is not supported by REX VPN")
+    override fun createBridge(options: BridgeOptions?): BridgeSession {
+        error("Platform bridge is not supported")
     }
 
     override fun lookupUser(username: String?): PlatformUser {
-        error("Platform user lookup is not supported by REX VPN")
+        error("Platform user lookup is not supported")
     }
 
-    // ---------------------------------------------------------
-    // Notification
-    // ---------------------------------------------------------
+    // libbox notifications
+
+    override fun sendNotification(
+        notification: io.nekohasekai.libbox.Notification
+    ) {
+        Log.d(TAG, "sing-box notification received")
+    }
+
+    override fun cancelNotification(identifier: String, typeID: Int) {
+        Log.d(TAG, "sing-box notification cancelled: $identifier")
+    }
+
+    // Android foreground notification
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -527,23 +439,18 @@ class RexSingBoxService : VpnService(), PlatformInterface {
                 setShowBadge(false)
             }
 
-            val manager = getSystemService(
-                NotificationManager::class.java
-            )
-
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(
-        message: String
-    ): Notification {
+    private fun buildNotification(message: String): android.app.Notification {
         val builder =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(this, CHANNEL_ID)
+                android.app.Notification.Builder(this, CHANNEL_ID)
             } else {
                 @Suppress("DEPRECATION")
-                Notification.Builder(this)
+                android.app.Notification.Builder(this)
             }
 
         return builder
@@ -551,18 +458,15 @@ class RexSingBoxService : VpnService(), PlatformInterface {
             .setContentTitle("REX VPN")
             .setContentText(message)
             .setOngoing(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
+            .setCategory(android.app.Notification.CATEGORY_SERVICE)
             .build()
     }
 
     private class StringArray(
         private val iterator: Iterator<String>
     ) : StringIterator {
-
         override fun len(): Int = 0
-
         override fun hasNext(): Boolean = iterator.hasNext()
-
         override fun next(): String = iterator.next()
     }
 }
