@@ -102,7 +102,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         flags: Int,
         startId: Int
     ): Int {
-    when (intent?.action) {
+        when (intent?.action) {
             ACTION_CONNECT -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
 
