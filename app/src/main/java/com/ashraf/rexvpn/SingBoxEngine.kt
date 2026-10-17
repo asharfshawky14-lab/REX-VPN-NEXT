@@ -1,18 +1,44 @@
+
 package com.ashraf.rexvpn
 
+import android.content.Context
 import android.util.Log
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.SetupOptions
 import io.nekohasekai.libbox.SystemProxyStatus
 
 class SingBoxEngine(
+    private val context: Context,
     private val platformInterface: PlatformInterface
 ) : CommandServerHandler {
 
     companion object {
         private const val TAG = "REXVPN-SINGBOX"
+        private var libboxInitialized = false
+
+        @Synchronized
+        private fun initializeLibbox(context: Context) {
+            if (libboxInitialized) return
+
+            val basePath = context.filesDir.absolutePath
+            val tempPath = context.cacheDir.absolutePath
+
+            val options = SetupOptions().apply {
+                setBasePath(basePath)
+                setWorkingPath(basePath)
+                setTempPath(tempPath)
+                setFixAndroidStack(true)
+            }
+
+            Libbox.setup(options)
+            libboxInitialized = true
+
+            Log.i(TAG, "Libbox initialized: $basePath")
+        }
     }
 
     private var commandServer: CommandServer? = null
@@ -24,6 +50,7 @@ class SingBoxEngine(
             "ملف إعدادات sing-box فارغ"
         }
 
+        initializeLibbox(context)
         disconnect()
 
         val server = CommandServer(this, platformInterface)
