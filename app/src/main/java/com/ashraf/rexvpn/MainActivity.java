@@ -110,7 +110,38 @@ public class MainActivity extends Activity {
         showHome();
         refreshConnectionState();
     }
+    @Override
+    protected void onStart() {
+        super.onStart();
 
+        IntentFilter filter = new IntentFilter(
+                RexSingBoxService.ACTION_STATUS
+        );
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(
+                    singBoxStatusReceiver,
+                    filter,
+                    android.content.Context.RECEIVER_NOT_EXPORTED
+            );
+        } else {
+            registerReceiver(
+                    singBoxStatusReceiver,
+                    filter
+            );
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        try {
+            unregisterReceiver(singBoxStatusReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // المستقبل غير مسجل بالفعل
+        }
+
+        super.onStop();
+    }
     private void showHome() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
