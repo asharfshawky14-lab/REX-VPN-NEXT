@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(18), dp(20), dp(20));
-        root.setBackgroundColor(bg);
+        root.setBackgroundResource(R.drawable.rex_background);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
