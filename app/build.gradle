@@ -1,7 +1,7 @@
 
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android' version '2.0.21'
+    id 'org.jetbrains.kotlin.android'
 }
 
 android {
@@ -45,10 +45,9 @@ dependencies {
     // WireGuard VPN engine
     implementation 'com.wireguard.android:tunnel:1.0.20260102'
 
-    // sing-box: VLESS, VMess, Trojan, Shadowsocks,
-    // Hysteria2, TUIC and other supported protocols
+    // sing-box engine library
     implementation 'com.github.singbox-android:libbox:1.14.3'
 
-    // Java compatibility
+    // Java API compatibility
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }
