@@ -176,7 +176,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         connecting = true
 
         try {
-            val newEngine = SingBoxEngine(this)
+            val newEngine = SingBoxEngine(this, this)
             engine = newEngine
             newEngine.connect(configJson)
 
