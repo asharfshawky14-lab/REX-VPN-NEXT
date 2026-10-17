@@ -1,3 +1,4 @@
+
 package com.ashraf.rexvpn;
 
 import android.app.Activity;
@@ -7,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.widget.Button;
@@ -14,6 +16,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -42,6 +47,9 @@ public class MainActivity extends Activity {
 
     private VpnEngine vpnEngine;
     private boolean connecting = false;
+    private boolean singBoxRequested = false;
+
+    private VpnEngine.EngineType pendingEngineType = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,7 +91,7 @@ public class MainActivity extends Activity {
         statusCard.addView(status);
 
         statusCard.addView(text(
-                "استورد ملف WireGuard صالحًا للاتصال",
+                "يدعم ملفات WireGuard وsing-box JSON",
                 12, muted, false
         ));
 
@@ -156,8 +164,9 @@ public class MainActivity extends Activity {
 
         if (requestCode == REQUEST_VPN_PERMISSION) {
             if (resultCode == RESULT_OK) {
-                startWireGuardConnection();
+                startPendingConnection();
             } else {
+                pendingEngineType = null;
                 connecting = false;
                 updateConnectionButton();
                 setStatus("تم رفض إذن VPN");
@@ -208,10 +217,11 @@ public class MainActivity extends Activity {
             String imported = content.toString().trim();
 
             if (imported.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "الملف فارغ."
-                );
+                throw new IllegalArgumentException("الملف فارغ.");
             }
+
+            VpnEngine.EngineType type =
+                    VpnEngine.detectEngine(imported);
 
             configText = imported;
             selectedName = getFileName(uri);
@@ -222,20 +232,20 @@ public class MainActivity extends Activity {
                             : selectedName
             );
 
-            VpnEngine.EngineType type =
-                    VpnEngine.detectEngine(configText);
-
             if (type == VpnEngine.EngineType.WIREGUARD) {
-                configInfo.setText(
-                        "تم استيراد ملف WireGuard."
-                );
+                configInfo.setText("تم استيراد ملف WireGuard.");
                 toast("تم استيراد إعداد WireGuard.");
+            } else if (isSingBoxJsonConfig(imported)) {
+                configInfo.setText(
+                        "تم استيراد إعداد sing-box بصيغة JSON."
+                );
+                toast("تم استيراد إعداد sing-box JSON.");
             } else {
                 configInfo.setText(
-                        "البروتوكول معروف، لكن محركه غير موصول بعد."
+                        "تم التعرف على الرابط؛ تحويل الروابط إلى JSON لم يُفعّل بعد."
                 );
                 toast(
-                        "ملف sing-box مستورد، لكن الاتصال به لم يُفعّل بعد."
+                        "الروابط المباشرة تحتاج خطوة تحويل قبل الاتصال."
                 );
             }
 
@@ -248,9 +258,29 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean isSingBoxJsonConfig(String value) {
+        if (value == null || !value.trim().startsWith("{")) {
+            return false;
+        }
+
+        try {
+            JSONObject json = new JSONObject(value);
+            JSONArray outbounds = json.optJSONArray("outbounds");
+
+            return outbounds != null && outbounds.length() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private void onConnectButtonPressed() {
         if (vpnEngine.isWireGuardConnected()) {
             disconnectWireGuard();
+            return;
+        }
+
+        if (singBoxRequested) {
+            disconnectSingBox();
             return;
         }
 
@@ -268,36 +298,60 @@ public class MainActivity extends Activity {
             VpnEngine.EngineType type =
                     VpnEngine.detectEngine(configText);
 
-            if (type != VpnEngine.EngineType.WIREGUARD) {
+            if (type == VpnEngine.EngineType.SING_BOX
+                    && !isSingBoxJsonConfig(configText)) {
                 toast(
-                        "الاتصال الفعلي بهذا البروتوكول لم يُربط بعد."
+                        "الملف ليس sing-box JSON صالحًا مبدئيًا. "
+                                + "روابط البروتوكولات تحتاج تحويلًا أولًا."
                 );
                 return;
             }
+
+            pendingEngineType = type;
 
             Intent permissionIntent = VpnService.prepare(this);
 
             if (permissionIntent != null) {
                 connecting = true;
                 updateConnectionButton();
+
                 startActivityForResult(
                         permissionIntent,
                         REQUEST_VPN_PERMISSION
                 );
             } else {
-                startWireGuardConnection();
+                startPendingConnection();
             }
 
         } catch (Exception e) {
+            pendingEngineType = null;
             connecting = false;
             updateConnectionButton();
             toast("الإعداد غير صالح: " + errorMessage(e));
         }
     }
 
+    private void startPendingConnection() {
+        VpnEngine.EngineType type = pendingEngineType;
+        pendingEngineType = null;
+
+        if (type == null) {
+            connecting = false;
+            updateConnectionButton();
+            toast("نوع الاتصال غير محدد. استورد الإعداد مرة أخرى.");
+            return;
+        }
+
+        if (type == VpnEngine.EngineType.WIREGUARD) {
+            startWireGuardConnection();
+        } else {
+            startSingBoxConnection();
+        }
+    }
+
     private void startWireGuardConnection() {
         connecting = true;
-        setStatus("جاري الاتصال...");
+        setStatus("جاري الاتصال بـ WireGuard...");
         updateConnectionButton();
 
         new Thread(() -> {
@@ -329,7 +383,7 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
                     connecting = false;
-                    setStatus("فشل الاتصال");
+                    setStatus("فشل اتصال WireGuard");
                     updateConnectionButton();
                     toast("فشل الاتصال: " + message);
                 });
@@ -337,10 +391,87 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void startSingBoxConnection() {
+        if (!isSingBoxJsonConfig(configText)) {
+            connecting = false;
+            updateConnectionButton();
+            setStatus("إعداد sing-box غير صالح");
+            toast("لازم ملف JSON يحتوي على outbounds.");
+            return;
+        }
+
+        connecting = true;
+        setStatus("جاري بدء خدمة sing-box...");
+        updateConnectionButton();
+
+        try {
+            Intent intent = RexSingBoxService.connectIntent(
+                    getApplicationContext(),
+                    configText
+            );
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+
+            singBoxRequested = true;
+            connecting = false;
+
+            setStatus("تم إرسال طلب تشغيل sing-box");
+            configInfo.setText(
+                    "أُرسل طلب التشغيل للخدمة؛ يلزم التحقق من سجل التشغيل."
+            );
+            updateConnectionButton();
+
+            toast(
+                    "أُرسل طلب تشغيل sing-box. "
+                            + "هذه الرسالة لا تؤكد نجاح النفق بعد."
+            );
+
+        } catch (Exception e) {
+            connecting = false;
+            singBoxRequested = false;
+            setStatus("تعذر بدء خدمة sing-box");
+            updateConnectionButton();
+            toast("فشل بدء الخدمة: " + errorMessage(e));
+        }
+    }
+
+    private void disconnectSingBox() {
+        connecting = true;
+        setStatus("جاري طلب فصل sing-box...");
+        updateConnectionButton();
+
+        try {
+            Intent intent = RexSingBoxService.disconnectIntent(
+                    getApplicationContext()
+            );
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startService(intent);
+            } else {
+                startService(intent);
+            }
+
+            singBoxRequested = false;
+            connecting = false;
+            setStatus("تم إرسال طلب الفصل");
+            updateConnectionButton();
+            toast("تم إرسال طلب فصل sing-box.");
+
+        } catch (Exception e) {
+            connecting = false;
+            updateConnectionButton();
+            toast("تعذر إرسال طلب الفصل: " + errorMessage(e));
+        }
+    }
+
     private void disconnectWireGuard() {
         connecting = true;
         updateConnectionButton();
-        setStatus("جاري الفصل...");
+        setStatus("جاري فصل WireGuard...");
 
         new Thread(() -> {
             try {
@@ -368,6 +499,8 @@ public class MainActivity extends Activity {
     private void refreshConnectionState() {
         if (vpnEngine != null && vpnEngine.isWireGuardConnected()) {
             setStatus("WireGuard متصل");
+        } else if (singBoxRequested) {
+            setStatus("تم طلب تشغيل sing-box");
         } else {
             setStatus("غير متصل");
         }
@@ -384,6 +517,8 @@ public class MainActivity extends Activity {
             connectButton.setText("جاري التنفيذ...");
         } else if (vpnEngine != null
                 && vpnEngine.isWireGuardConnected()) {
+            connectButton.setText("فصل الاتصال");
+        } else if (singBoxRequested) {
             connectButton.setText("فصل الاتصال");
         } else {
             connectButton.setText("اتصال");
@@ -435,9 +570,10 @@ public class MainActivity extends Activity {
         setSimplePage(
                 "حول REX VPN",
                 "واجهة مشروع REX VPN NEXT.\n\n"
-                        + "تم ربط زر الاتصال بمحرك WireGuard الموجود "
-                        + "في المشروع. نجاح تشغيل النفق لا يضمن وحده "
-                        + "أن الخادم يتيح الوصول إلى الإنترنت."
+                        + "يدعم المشروع مسار WireGuard الحالي "
+                        + "وطلب تشغيل خدمة sing-box لملفات JSON. "
+                        + "يجب اختبار التشغيل الفعلي والتحقق من "
+                        + "السجلات قبل اعتبار الاتصال ناجحًا."
         );
     }
 
