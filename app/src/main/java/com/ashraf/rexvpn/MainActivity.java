@@ -84,12 +84,16 @@ logoParams.bottomMargin = dp(6);
 
 page.addView(brand, logoParams);
 
-        TextView tagline = text(
-                "THE POWER BEHIND THE SHADOW",
-                11, cyan, true
-        );
-        tagline.setPadding(0, dp(4), 0, dp(22));
-        page.addView(tagline);
+        ImageView tagline = new ImageView(this);
+tagline.setImageResource(R.drawable.rex_slogan);
+tagline.setAdjustViewBounds(true);
+tagline.setScaleType(ImageView.ScaleType.FIT_CENTER);
+
+LinearLayout.LayoutParams sloganParams =
+        new LinearLayout.LayoutParams(-1, dp(45));
+sloganParams.bottomMargin = dp(22);
+
+page.addView(tagline, sloganParams);
 
         LinearLayout statusCard = card();
         statusCard.addView(text("حالة الاتصال", 15, muted, false));
