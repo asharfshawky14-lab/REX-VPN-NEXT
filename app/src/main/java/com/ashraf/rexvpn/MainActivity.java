@@ -29,7 +29,55 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
+    private final BroadcastReceiver singBoxStatusReceiver =
+            new BroadcastReceiver() {
+        @Override
+        public void onReceive(
+                android.content.Context context,
+                Intent intent
+        ) {
+            if (!RexSingBoxService.ACTION_STATUS.equals(
+                    intent.getAction())) {
+                return;
+            }
 
+            String state = intent.getStringExtra(
+                    RexSingBoxService.EXTRA_STATUS);
+
+            String message = intent.getStringExtra(
+                    RexSingBoxService.EXTRA_MESSAGE);
+
+            if (RexSingBoxService.STATUS_CONNECTING.equals(state)) {
+                connecting = true;
+                singBoxRequested = true;
+                setStatus(message != null
+                        ? message : "جاري الاتصال...");
+
+            } else if (RexSingBoxService.STATUS_STARTED.equals(state)) {
+                connecting = false;
+                singBoxRequested = true;
+                setStatus(message != null
+                        ? message : "بدأت خدمة sing-box");
+
+            } else if (RexSingBoxService.STATUS_DISCONNECTED.equals(state)) {
+                connecting = false;
+                singBoxRequested = false;
+                setStatus(message != null
+                        ? message : "غير متصل");
+
+            } else if (RexSingBoxService.STATUS_FAILED.equals(state)) {
+                connecting = false;
+                singBoxRequested = false;
+                setStatus(message != null
+                        ? message : "فشل الاتصال");
+
+                toast(message != null
+                        ? message : "فشل الاتصال");
+            }
+
+            updateConnectionButton();
+        }
+    };
     private static final int REQUEST_CONFIG = 101;
     private static final int REQUEST_VPN_PERMISSION = 102;
 
