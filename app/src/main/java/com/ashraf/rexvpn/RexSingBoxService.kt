@@ -42,7 +42,7 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         const val ACTION_DISCONNECT =
             "com.ashraf.rexvpn.action.SINGBOX_DISCONNECT"
 
-                const val EXTRA_CONFIG =
+        const val EXTRA_CONFIG =
             "com.ashraf.rexvpn.extra.SINGBOX_CONFIG"
 
         const val ACTION_STATUS =
