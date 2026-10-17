@@ -1,5 +1,4 @@
 
-<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -26,7 +25,6 @@
 
         </activity>
 
-        <!-- Existing WireGuard service: preserved -->
         <service
             android:name="com.wireguard.android.backend.GoBackend$VpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
@@ -38,7 +36,6 @@
 
         </service>
 
-        <!-- sing-box VPN service -->
         <service
             android:name=".RexSingBoxService"
             android:permission="android.permission.BIND_VPN_SERVICE"
