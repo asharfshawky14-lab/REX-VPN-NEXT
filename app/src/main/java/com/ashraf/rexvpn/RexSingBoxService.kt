@@ -1,3 +1,4 @@
+
 package com.ashraf.rexvpn
 
 import android.app.NotificationChannel
@@ -88,12 +89,11 @@ class RexSingBoxService : VpnService(), PlatformInterface {
                     return START_NOT_STICKY
                 }
 
-                startForeground(
-                    NOTIFICATION_ID,
-                    buildNotification("جاري تشغيل الاتصال")
-                )
-
                 try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification("جاري تشغيل الاتصال")
+                    )
                     startSingBox(config)
                 } catch (error: Exception) {
                     Log.e(TAG, "Failed to start sing-box", error)
@@ -121,21 +121,28 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     @Synchronized
     private fun startSingBox(configJson: String) {
         check(!connecting) { "sing-box is already starting" }
+
+        // Close any previous session before marking a new one as starting.
+        stopSingBox()
         connecting = true
 
         try {
-            stopSingBox()
-
             val newEngine = SingBoxEngine(this)
             engine = newEngine
             newEngine.connect(configJson)
 
-            Log.i(TAG, "sing-box started")
+            Log.i(TAG, "sing-box start request completed")
         } catch (error: Exception) {
             runCatching { engine?.disconnect() }
+                .onFailure {
+                    Log.e(TAG, "Engine cleanup failed", it)
+                }
             engine = null
 
             runCatching { tunDescriptor?.close() }
+                .onFailure {
+                    Log.e(TAG, "TUN cleanup failed", it)
+                }
             tunDescriptor = null
 
             throw error
@@ -150,10 +157,14 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         engine = null
 
         runCatching { oldEngine?.disconnect() }
-            .onFailure { Log.e(TAG, "Engine shutdown failed", it) }
+            .onFailure {
+                Log.e(TAG, "Engine shutdown failed", it)
+            }
 
         runCatching { tunDescriptor?.close() }
-            .onFailure { Log.e(TAG, "TUN close failed", it) }
+            .onFailure {
+                Log.e(TAG, "TUN close failed", it)
+            }
 
         tunDescriptor = null
         connecting = false
@@ -232,7 +243,11 @@ class RexSingBoxService : VpnService(), PlatformInterface {
                 try {
                     builder.addAllowedApplication(packageName)
                 } catch (error: PackageManager.NameNotFoundException) {
-                    Log.w(TAG, "Included package not found: $packageName", error)
+                    Log.w(
+                        TAG,
+                        "Included package not found: $packageName",
+                        error
+                    )
                 }
             }
 
@@ -242,7 +257,11 @@ class RexSingBoxService : VpnService(), PlatformInterface {
                 try {
                     builder.addDisallowedApplication(packageName)
                 } catch (error: PackageManager.NameNotFoundException) {
-                    Log.w(TAG, "Excluded package not found: $packageName", error)
+                    Log.w(
+                        TAG,
+                        "Excluded package not found: $packageName",
+                        error
+                    )
                 }
             }
         }
@@ -258,7 +277,9 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        check(protect(fd)) { "Unable to protect socket from VPN routing" }
+        check(protect(fd)) {
+            "Unable to protect socket from VPN routing"
+        }
     }
 
     override fun useProcFS(): Boolean =
@@ -321,18 +342,18 @@ class RexSingBoxService : VpnService(), PlatformInterface {
 
                 runCatching { item.mtu = networkInterface.mtu }
 
-                item.addresses = StringArray(
-                    networkInterface.interfaceAddresses.mapNotNull { entry ->
+                val addresses = networkInterface.interfaceAddresses
+                    .mapNotNull { entry ->
                         val address = entry.address ?: return@mapNotNull null
                         val host = address.hostAddress ?: return@mapNotNull null
                         "$host/${entry.networkPrefixLength}"
-                    }.iterator()
-                )
+                    }
 
-                item.dnsServer = StringArray(emptyList<String>().iterator())
-                item.gateway = StringArray(emptyList<String>().iterator())
+                item.addresses = StringArray(addresses)
+                item.dnsServer = StringArray(emptyList())
+                item.gateway = StringArray(emptyList())
                 item.type = Libbox.InterfaceTypeOther
-                item.flags = if (networkInterface.isUp) 1 else 0
+                item.flags = 1
                 item.metered = false
 
                 interfaces.add(item)
@@ -444,7 +465,9 @@ class RexSingBoxService : VpnService(), PlatformInterface {
         }
     }
 
-    private fun buildNotification(message: String): android.app.Notification {
+    private fun buildNotification(
+        message: String
+    ): android.app.Notification {
         val builder =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 android.app.Notification.Builder(this, CHANNEL_ID)
@@ -463,10 +486,14 @@ class RexSingBoxService : VpnService(), PlatformInterface {
     }
 
     private class StringArray(
-        private val iterator: Iterator<String>
+        private val values: List<String>
     ) : StringIterator {
-        override fun len(): Int = 0
-        override fun hasNext(): Boolean = iterator.hasNext()
-        override fun next(): String = iterator.next()
+        private var index = 0
+
+        override fun len(): Int = values.size
+
+        override fun hasNext(): Boolean = index < values.size
+
+        override fun next(): String = values[index++]
     }
 }
